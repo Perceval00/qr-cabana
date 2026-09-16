@@ -8,20 +8,38 @@ type Props = {
   icon: keyof typeof Ionicons.glyphMap;
   theme?: 'primary';
   onPress: () => void;
+  disabled?: boolean;
 };
 
-export default function AppButton({ title, icon, theme, onPress }: Props) {
+export default function AppButton({
+  title,
+  icon,
+  theme,
+  onPress,
+  disabled,
+}: Props) {
   if (theme === 'primary') {
     return (
       <View
         style={[
           styles.buttonOuter,
-          { borderWidth: 3, borderColor: COLORS.primary, borderRadius: 18 },
+          {
+            borderWidth: 3,
+            borderColor: COLORS.primary,
+            borderRadius: 18,
+          },
         ]}
       >
         <Pressable
-          style={[styles.buttonInner, { backgroundColor: COLORS.primary }]}
+          style={[
+            styles.buttonInner,
+            {
+              backgroundColor: COLORS.primary,
+              opacity: disabled ? 0.5 : 1,
+            },
+          ]}
           onPress={onPress}
+          disabled={disabled}
         >
           <Ionicons
             name={icon}
@@ -29,6 +47,7 @@ export default function AppButton({ title, icon, theme, onPress }: Props) {
             color={COLORS.textOnPrimary}
             style={styles.icon}
           />
+
           <Text style={[styles.label, { color: COLORS.textOnPrimary }]}>
             {title}
           </Text>
@@ -39,13 +58,21 @@ export default function AppButton({ title, icon, theme, onPress }: Props) {
 
   return (
     <View style={styles.buttonOuter}>
-      <Pressable style={styles.buttonInner} onPress={onPress}>
+      <Pressable
+        style={[
+          styles.buttonInner,
+          { opacity: disabled ? 0.5 : 1 },
+        ]}
+        onPress={onPress}
+        disabled={disabled}
+      >
         <Ionicons
           name={icon}
           size={22}
           color={COLORS.textSecondary}
           style={styles.icon}
         />
+
         <Text style={styles.label}>{title}</Text>
       </Pressable>
     </View>
@@ -71,6 +98,12 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  icon: { paddingRight: 10 },
-  label: { fontSize: 17, fontWeight: '600', color: COLORS.textPrimary },
+  icon: {
+    paddingRight: 10,
+  },
+  label: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
 });
