@@ -2,7 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   Platform,
   Pressable,
@@ -16,10 +17,13 @@ import QRCode from 'react-native-qrcode-svg';
 
 import AppButton from '@/components/AppButton';
 import { COLORS } from '@/constants/colors';
-import { createEvent } from '@/lib/database';
+import { createEvent } from '@/lib/events';
+import { useAuth } from '@/lib/auth';
+import { getProfile } from '@/lib/profiles';
 
 function toLocalISO(date: Date) {
   const pad = (n: number) => String(n).padStart(2, '0');
+
   return (
     `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
     `T${pad(date.getHours())}:${pad(date.getMinutes())}:00`
@@ -29,6 +33,7 @@ function toLocalISO(date: Date) {
 function formatDateTime(date: Date) {
   const pad = (n: number) => String(n).padStart(2, '0');
   const month = date.toLocaleString('en-US', { month: 'short' });
+
   return `${month} ${pad(date.getDate())}, ${date.getFullYear()} at ${pad(
     date.getHours()
   )}:${pad(date.getMinutes())}`;
@@ -43,6 +48,42 @@ const QUICK_END_OPTIONS = [
 type EditTarget = 'start' | 'end';
 
 export default function TeacherScreen() {
+  const { user } = useAuth();
+
+  const [role, setRole] = useState<'student' | 'teacher' | null>(null);
+  const [roleLoading, setRoleLoading] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      async function loadRole() {
+        if (!user?.id) {
+          if (active) {
+            setRole('student');
+            setRoleLoading(false);
+          }
+          return;
+        }
+
+        setRoleLoading(true);
+
+        const profile = await getProfile(user.id);
+
+        if (active) {
+          setRole(profile?.role ?? 'student');
+          setRoleLoading(false);
+        }
+      }
+
+      loadRole();
+
+      return () => {
+        active = false;
+      };
+    }, [user?.id])
+  );
+
   const [title, setTitle] = useState('');
   const [eventId, setEventId] = useState('');
   const [startDate, setStartDate] = useState(() => new Date());
@@ -67,6 +108,7 @@ export default function TeacherScreen() {
     selected?: Date
   ) => {
     if (!editTarget) return;
+
     if (event.type === 'dismissed' || !selected) {
       setEditTarget(null);
       setEditingPart('date');
@@ -75,11 +117,20 @@ export default function TeacherScreen() {
 
     const current = editTarget === 'start' ? startDate : endDate;
     const next = new Date(current);
-    next.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate());
+
+    next.setFullYear(
+      selected.getFullYear(),
+      selected.getMonth(),
+      selected.getDate()
+    );
+
     next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
 
-    if (editTarget === 'start') setStartDate(next);
-    else setEndDate(next);
+    if (editTarget === 'start') {
+      setStartDate(next);
+    } else {
+      setEndDate(next);
+    }
 
     if (isAndroid && editingPart === 'date') {
       setEditingPart('time');
@@ -112,8 +163,14 @@ export default function TeacherScreen() {
       return;
     }
 
-    createEvent(event).then(() => {
+    createEvent(event).then(({ error }) => {
+      if (error) {
+        setMessage(`Unable to save event: ${error}`);
+        return;
+      }
+
       setMessage('Event saved! Scan the QR with the Scan tab to test it.');
+
       setPayload(
         JSON.stringify({
           v: 1,
@@ -126,6 +183,29 @@ export default function TeacherScreen() {
     });
   };
 
+  // TEACHER-ONLY PROTECTION
+  if (roleLoading) {
+    return (
+      <View style={styles.lockContainer}>
+        <Text style={styles.lockTitle}>Checking your account...</Text>
+      </View>
+    );
+  }
+
+  if (role !== 'teacher') {
+    return (
+      <View style={styles.lockContainer}>
+        <Text style={styles.lockIcon}>🔒</Text>
+
+        <Text style={styles.lockTitle}>Teachers Only</Text>
+
+        <Text style={styles.lockMessage}>
+          Only teacher accounts can create events and generate QR codes.
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <ScrollView
       style={styles.container}
@@ -133,11 +213,13 @@ export default function TeacherScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <Text style={styles.title}>Create Event QR</Text>
+
       <Text style={styles.subtitle}>
         Fill in the event details, then scan the generated QR with the Scan tab.
       </Text>
 
       <Text style={styles.label}>Event Title</Text>
+
       <TextInput
         style={styles.input}
         value={title}
@@ -147,6 +229,7 @@ export default function TeacherScreen() {
       />
 
       <Text style={styles.label}>Event Code</Text>
+
       <TextInput
         style={styles.input}
         value={eventId}
@@ -157,6 +240,7 @@ export default function TeacherScreen() {
       />
 
       <Text style={styles.label}>Starts</Text>
+
       <PickerField
         value={formatDateTime(startDate)}
         icon="sunny-outline"
@@ -164,11 +248,13 @@ export default function TeacherScreen() {
       />
 
       <Text style={styles.label}>Ends</Text>
+
       <PickerField
         value={formatDateTime(endDate)}
         icon="moon-outline"
         onPress={() => openPicker('end')}
       />
+
       <View style={styles.chipRow}>
         {QUICK_END_OPTIONS.map((option) => (
           <Pressable
@@ -180,7 +266,10 @@ export default function TeacherScreen() {
           </Pressable>
         ))}
       </View>
-      <Text style={styles.hint}>Tap a chip to set the end time from start.</Text>
+
+      <Text style={styles.hint}>
+        Tap a chip to set the end time from start.
+      </Text>
 
       {message && <Text style={styles.message}>{message}</Text>}
 
@@ -207,9 +296,11 @@ export default function TeacherScreen() {
           <Text style={styles.resultTitle}>
             Scan this QR code with the Scan tab:
           </Text>
+
           <View style={styles.qrBox}>
             <QRCode value={payload} size={200} />
           </View>
+
           <Text style={styles.payloadText}>{payload}</Text>
         </View>
       )}
@@ -223,41 +314,89 @@ type PickerFieldProps = {
   onPress: () => void;
 };
 
-function PickerField({ value, icon, onPress }: PickerFieldProps) {
+function PickerField({
+  value,
+  icon,
+  onPress,
+}: PickerFieldProps) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.pickerField, pressed && styles.pickerFieldPressed]}
+      style={({ pressed }) => [
+        styles.pickerField,
+        pressed && styles.pickerFieldPressed,
+      ]}
       onPress={onPress}
     >
-      <Ionicons name={icon} size={20} color={COLORS.primary} />
+      <Ionicons
+        name={icon}
+        size={20}
+        color={COLORS.primary}
+      />
+
       <Text style={styles.pickerValue}>{value}</Text>
-      <Ionicons name="calendar-outline" size={18} color={COLORS.textSecondary} />
+
+      <Ionicons
+        name="calendar-outline"
+        size={18}
+        color={COLORS.textSecondary}
+      />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
+  lockContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+
+  lockIcon: {
+    fontSize: 40,
+    marginBottom: 12,
+  },
+
+  lockTitle: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: 8,
+  },
+
+  lockMessage: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
+
   content: {
     paddingHorizontal: 24,
     paddingTop: 24,
     paddingBottom: 40,
   },
+
   title: {
     fontSize: 20,
     fontWeight: '600',
     color: COLORS.textPrimary,
     marginBottom: 4,
   },
+
   subtitle: {
     fontSize: 14,
     color: COLORS.textSecondary,
     lineHeight: 20,
     marginBottom: 16,
   },
+
   label: {
     fontSize: 14,
     fontWeight: '600',
@@ -265,6 +404,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     marginTop: 10,
   },
+
   input: {
     backgroundColor: COLORS.card,
     borderRadius: 14,
@@ -275,6 +415,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.textPrimary,
   },
+
   pickerField: {
     backgroundColor: COLORS.card,
     borderRadius: 14,
@@ -285,9 +426,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+
   pickerFieldPressed: {
     backgroundColor: COLORS.surface,
   },
+
   pickerValue: {
     flex: 1,
     fontSize: 15,
@@ -295,10 +438,12 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     marginHorizontal: 10,
   },
+
   chipRow: {
     flexDirection: 'row',
     marginTop: 8,
   },
+
   chip: {
     backgroundColor: COLORS.surface,
     borderRadius: 999,
@@ -306,26 +451,31 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     marginRight: 8,
   },
+
   chipText: {
     fontSize: 13,
     fontWeight: '600',
     color: COLORS.primary,
   },
+
   hint: {
     fontSize: 12,
     color: COLORS.textSecondary,
     marginTop: 6,
   },
+
   pickerContainer: {
     marginTop: 12,
     alignItems: 'center',
   },
+
   message: {
     fontSize: 14,
     color: COLORS.primary,
     textAlign: 'center',
     marginTop: 12,
   },
+
   resultCard: {
     backgroundColor: COLORS.card,
     borderRadius: 14,
@@ -333,11 +483,15 @@ const styles = StyleSheet.create({
     marginTop: 20,
     alignItems: 'center',
     shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
+
   resultTitle: {
     fontSize: 15,
     fontWeight: '600',
@@ -345,12 +499,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 12,
   },
+
   qrBox: {
     backgroundColor: '#FFFFFF',
     padding: 12,
     borderRadius: 10,
     marginBottom: 12,
   },
+
   payloadText: {
     fontSize: 12,
     color: COLORS.textSecondary,
@@ -358,4 +514,3 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 });
-
